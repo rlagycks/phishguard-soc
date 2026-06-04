@@ -1,0 +1,67 @@
+# VCS / local editor state
+.git
+.github
+.idea
+.vscode
+.claude
+.codex
+.agents
+.DS_Store
+**/.DS_Store
+
+# Secrets and runtime-only config
+.env
+.env.*
+backend/.env
+backend/credentials/**
+credentials/**
+ngrok.yml
+
+# Python local state
+**/__pycache__/
+**/*.py[cod]
+backend/.venv/
+.venv/
+venv/
+**/.pytest_cache/
+**/.ruff_cache/
+htmlcov/
+.coverage
+
+# Node local/build state
+frontend/node_modules/
+node_modules/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+postgres_data/
+pgdata/
+logs/
+*.log
+
+# Models are mounted on EC2, not baked into GHCR images.
+backend/models/
+models/
+*.pkl
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Training datasets and large local analysis files
+*.csv
+데이터셋 분석/
+데이터셋 분석/
+
+# Legacy/generated UI references not needed in the production image
+dashboard/
+soc/
+
+# Documentation and reports are not needed in the runtime image
+*.md
