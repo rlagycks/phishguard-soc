@@ -44,14 +44,5 @@ cd ../backend
 ./.venv/bin/python -m pytest tests/test_dashboard_api.py
 ```
 
-## 절대 커밋하지 않는 파일
-
-- `.env`
-- `backend/models/`
-- `models/`
-- `*.pkl`, `*.bin`, `*.safetensors`
-- `*.db`, `*.sqlite`
-- `*.csv`
-- Google credentials / token files
 
 자세한 AWS 배포 절차는 [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md)를 참고하세요.
