@@ -91,7 +91,7 @@ def extract_features(url: str) -> URLFeatures:
         path_length=len(path),
         num_digits=sum(c.isdigit() for c in url),
         num_special_chars=special_chars,
-        at_symbol="@" in url,
+        at_symbol="@" in parsed.netloc,
         double_slash=url.count("//") > 1,
         prefix_suffix_dash="-" in hostname,
         subdomain_count=subdomain_count,
