@@ -60,7 +60,7 @@ async def _process_message(
 
     action = "skipped"
     try:
-        action = action_engine.execute(message_id, result)
+        action = action_engine.execute(message_id, result, email=email_address)
     except Exception as e:
         logger.warning("Action engine failed for %s: %s", message_id, e)
 

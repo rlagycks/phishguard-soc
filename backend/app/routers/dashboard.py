@@ -172,7 +172,10 @@ def hourly_counts(db: DbDep, current_user: UserDep):
 
 @router.get("/system-health", response_model=dict)
 def system_health(db: DbDep, current_user: UserDep):
-    watch = db.query(orm.WatchStatus).first()
+    watch = (
+        db.query(orm.WatchStatus).filter_by(email_address=current_user).first()
+        or db.query(orm.WatchStatus).first()
+    )
     avg_ms = (
         db.query(func.avg(orm.EmailAnalysis.analysis_time_ms))
         .filter(orm.EmailAnalysis.owner_email == current_user)
