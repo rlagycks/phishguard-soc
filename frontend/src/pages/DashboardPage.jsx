@@ -67,16 +67,30 @@ export function DashboardPage({ live, onSelect }) {
 
 function Distribution({ stats }) {
   const total = stats?.total || 0;
+  const quarantined = stats?.quarantined || 0;
+  const review = stats?.review || 0;
+  const normal = stats?.normal || 0;
+
+  const dangerPct = total > 0 ? (quarantined / total) * 100 : 0;
+  const warnPct = total > 0 ? (review / total) * 100 : 0;
+  const p1 = dangerPct.toFixed(1);
+  const p2 = (dangerPct + warnPct).toFixed(1);
+  const donutStyle = total > 0
+    ? { background: `conic-gradient(var(--danger) 0 ${p1}%, var(--warn) ${p1}% ${p2}%, #2a3a5e ${p2}% 100%)` }
+    : { background: "#2a3a5e" };
+
   const rows = [
-    ["danger", "위험 · 격리", stats?.quarantined || 0],
-    ["warn", "의심 · 검토", stats?.review || 0],
-    ["ok", "정상 · 통과", stats?.normal || 0]
+    ["danger", "위험 · 격리", quarantined],
+    ["warn", "의심 · 검토", review],
+    ["ok", "정상 · 통과", normal]
   ];
   return (
     <section className="card panel-card">
       <h2>위험도 분포</h2>
       <div className="distribution">
-        <div className="donut"><strong className="mono">{total}</strong><span>분석 메일</span></div>
+        <div className="donut" style={donutStyle}>
+          <strong className="mono">{total}</strong><span>분석 메일</span>
+        </div>
         <div>
           {rows.map(([tone, label, value]) => (
             <p key={label}><span className={`dot ${tone}`} />{label}<b className="mono">{value}</b></p>

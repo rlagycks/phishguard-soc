@@ -130,7 +130,7 @@ h1, h2, h3, p { margin: 0; }
 .side-stack { display: flex; flex-direction: column; gap: 16px; overflow: auto; min-height: 0; }
 .panel-card { padding: 16px 18px; }
 .distribution { display: flex; align-items: center; gap: 18px; margin-top: 16px; }
-.donut { width: 132px; height: 132px; border-radius: 50%; display: grid; place-items: center; text-align: center; background: conic-gradient(var(--danger) 0 32%, var(--warn) 32% 55%, #2a3a5e 55% 100%); position: relative; flex: none; }
+.donut { width: 132px; height: 132px; border-radius: 50%; display: grid; place-items: center; text-align: center; background: #2a3a5e; position: relative; flex: none; }
 .donut:before { content: ""; position: absolute; inset: 18px; border-radius: 50%; background: var(--surface-1); }
 .donut strong, .donut span { position: relative; display: block; }
 .donut strong { color: var(--text-1); font-size: 28px; }
