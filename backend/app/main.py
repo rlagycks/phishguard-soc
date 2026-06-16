@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
-from app.database import init_db
+from app.database import init_db, migrate_db
 from app.routers import webhook, dashboard, admin
 
 settings = get_settings()
@@ -23,6 +23,7 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    migrate_db()
 
     # Schedule Gmail watch renewal every 23 hours (watch expires in 7 days but renew daily is safe)
     from apscheduler.schedulers.asyncio import AsyncIOScheduler

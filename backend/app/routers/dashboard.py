@@ -1,7 +1,7 @@
 """SOC Dashboard REST API endpoints."""
 
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Integer, cast, func
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models import orm
 from app.models.schemas import (
     DashboardStats,
@@ -20,18 +21,24 @@ from app.models.schemas import (
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 DbDep = Annotated[Session, Depends(get_db)]
+UserDep = Annotated[str, Depends(get_current_user)]
 settings = get_settings()
 
 
 @router.get("/stats", response_model=DashboardStats)
-def get_stats(db: DbDep):
-    total = db.query(orm.EmailAnalysis).count()
-    normal = db.query(orm.EmailAnalysis).filter(orm.EmailAnalysis.risk_level == "normal").count()
-    suspicious = db.query(orm.EmailAnalysis).filter(orm.EmailAnalysis.risk_level == "suspicious").count()
-    dangerous = db.query(orm.EmailAnalysis).filter(orm.EmailAnalysis.risk_level == "dangerous").count()
-    quarantined = db.query(orm.EmailAnalysis).filter(orm.EmailAnalysis.status == "quarantined").count()
+def get_stats(db: DbDep, current_user: UserDep):
+    q = db.query(orm.EmailAnalysis).filter(orm.EmailAnalysis.owner_email == current_user)
+    total = q.count()
+    normal = q.filter(orm.EmailAnalysis.risk_level == "normal").count()
+    suspicious = q.filter(orm.EmailAnalysis.risk_level == "suspicious").count()
+    dangerous = q.filter(orm.EmailAnalysis.risk_level == "dangerous").count()
+    quarantined = q.filter(orm.EmailAnalysis.status == "quarantined").count()
 
-    avg_ms = db.query(func.avg(orm.EmailAnalysis.analysis_time_ms)).scalar()
+    avg_ms = (
+        db.query(func.avg(orm.EmailAnalysis.analysis_time_ms))
+        .filter(orm.EmailAnalysis.owner_email == current_user)
+        .scalar()
+    )
 
     return DashboardStats(
         total=total,
@@ -47,12 +54,13 @@ def get_stats(db: DbDep):
 @router.get("/emails", response_model=list[EmailAnalysisSummary])
 def list_emails(
     db: DbDep,
-    risk_level: str | None = Query(default=None),
-    status: str | None = Query(default=None),
+    current_user: UserDep,
+    risk_level: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
 ):
-    q = db.query(orm.EmailAnalysis)
+    q = db.query(orm.EmailAnalysis).filter(orm.EmailAnalysis.owner_email == current_user)
     if risk_level:
         q = q.filter(orm.EmailAnalysis.risk_level == risk_level)
     if status:
@@ -61,9 +69,10 @@ def list_emails(
 
 
 @router.get("/emails/recent", response_model=list[EmailAnalysisSummary])
-def recent_emails(db: DbDep, limit: int = Query(default=20, le=100)):
+def recent_emails(db: DbDep, current_user: UserDep, limit: int = Query(default=20, le=100)):
     return (
         db.query(orm.EmailAnalysis)
+        .filter(orm.EmailAnalysis.owner_email == current_user)
         .order_by(orm.EmailAnalysis.created_at.desc())
         .limit(limit)
         .all()
@@ -71,21 +80,21 @@ def recent_emails(db: DbDep, limit: int = Query(default=20, le=100)):
 
 
 @router.get("/emails/{email_id}", response_model=EmailAnalysisRead)
-def get_email(email_id: int, db: DbDep):
+def get_email(email_id: int, db: DbDep, current_user: UserDep):
     record = db.get(orm.EmailAnalysis, email_id)
-    if not record:
+    if not record or record.owner_email != current_user:
         raise HTTPException(status_code=404, detail="Email analysis not found")
     return record
 
 
 @router.patch("/emails/{email_id}/status", response_model=EmailAnalysisRead)
-def update_status(email_id: int, payload: StatusUpdate, db: DbDep):
+def update_status(email_id: int, payload: StatusUpdate, db: DbDep, current_user: UserDep):
     allowed = {"normal", "needs_review", "quarantined"}
     if payload.status not in allowed:
         raise HTTPException(status_code=422, detail=f"status must be one of {allowed}")
 
     record = db.get(orm.EmailAnalysis, email_id)
-    if not record:
+    if not record or record.owner_email != current_user:
         raise HTTPException(status_code=404, detail="Email analysis not found")
 
     record.status = payload.status
@@ -95,7 +104,7 @@ def update_status(email_id: int, payload: StatusUpdate, db: DbDep):
 
 
 @router.get("/daily", response_model=list[dict])
-def daily_counts(db: DbDep, days: int = Query(default=7, le=30)):
+def daily_counts(db: DbDep, current_user: UserDep, days: int = Query(default=7, le=30)):
     """Returns per-day detection counts for the last N days."""
     rows = (
         db.query(
@@ -105,6 +114,7 @@ def daily_counts(db: DbDep, days: int = Query(default=7, le=30)):
                 cast((orm.EmailAnalysis.risk_level == "dangerous"), Integer)
             ).label("dangerous"),
         )
+        .filter(orm.EmailAnalysis.owner_email == current_user)
         .group_by("day")
         .order_by("day")
         .limit(days)
@@ -114,9 +124,10 @@ def daily_counts(db: DbDep, days: int = Query(default=7, le=30)):
 
 
 @router.get("/action-logs", response_model=list[dict])
-def action_logs(db: DbDep, limit: int = Query(default=80, le=200)):
+def action_logs(db: DbDep, current_user: UserDep, limit: int = Query(default=80, le=200)):
     rows = (
         db.query(orm.EmailAnalysis)
+        .filter(orm.EmailAnalysis.owner_email == current_user)
         .order_by(orm.EmailAnalysis.created_at.desc())
         .limit(limit)
         .all()
@@ -139,8 +150,8 @@ def action_logs(db: DbDep, limit: int = Query(default=80, le=200)):
 
 
 @router.get("/hourly", response_model=list[dict])
-def hourly_counts(db: DbDep):
-    rows = db.query(orm.EmailAnalysis).all()
+def hourly_counts(db: DbDep, current_user: UserDep):
+    rows = db.query(orm.EmailAnalysis).filter(orm.EmailAnalysis.owner_email == current_user).all()
     buckets = {
         hour: {"hour": hour, "total": 0, "quarantined": 0, "needs_review": 0, "normal": 0}
         for hour in range(24)
@@ -160,9 +171,13 @@ def hourly_counts(db: DbDep):
 
 
 @router.get("/system-health", response_model=dict)
-def system_health(db: DbDep):
+def system_health(db: DbDep, current_user: UserDep):
     watch = db.query(orm.WatchStatus).first()
-    avg_ms = db.query(func.avg(orm.EmailAnalysis.analysis_time_ms)).scalar()
+    avg_ms = (
+        db.query(func.avg(orm.EmailAnalysis.analysis_time_ms))
+        .filter(orm.EmailAnalysis.owner_email == current_user)
+        .scalar()
+    )
     return {
         "items": [
             {
@@ -216,7 +231,7 @@ def model_performance():
     }
 
 
-def _tone_for_status(status: str, risk_level: str | None) -> str:
+def _tone_for_status(status: str, risk_level: Optional[str]) -> str:
     if status == "quarantined" or risk_level == "dangerous":
         return "danger"
     if status in {"needs_review", "review"} or risk_level == "suspicious":
@@ -224,7 +239,7 @@ def _tone_for_status(status: str, risk_level: str | None) -> str:
     return "ok"
 
 
-def _action_label(status: str, action_taken: str | None) -> str:
+def _action_label(status: str, action_taken: Optional[str]) -> str:
     action = action_taken or status
     labels = {
         "quarantined": "Quarantine label 적용 + INBOX 제거",
@@ -237,7 +252,7 @@ def _action_label(status: str, action_taken: str | None) -> str:
     return labels.get(action, action)
 
 
-def _watch_detail(watch: orm.WatchStatus | None) -> str:
+def _watch_detail(watch: Optional[orm.WatchStatus]) -> str:
     if not watch:
         return "watch 없음"
     if watch.expiration_ms:

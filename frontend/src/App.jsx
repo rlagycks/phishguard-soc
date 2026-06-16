@@ -27,8 +27,7 @@ export function App() {
 
   function logout() {
     clearTokens();
-    setUser(null);
-    setRoute("dashboard");
+    window.location.href = "/";
   }
 
   if (checking) return <div className="boot-screen">SOC 세션을 확인하는 중입니다.</div>;

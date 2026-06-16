@@ -65,6 +65,7 @@ async def _process_message(message_id: str, history_id: str, db: Session) -> Non
     record = orm.EmailAnalysis(
         message_id=message_id,
         history_id=history_id,
+        owner_email=email_address,
         received_at=parsed.received_at,
         sender=parsed.sender,
         sender_domain=parsed.sender_domain,
