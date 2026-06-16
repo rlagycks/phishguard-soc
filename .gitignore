@@ -70,8 +70,8 @@ credentials/
 *.pth
 *.bin
 *.safetensors
-models/
 backend/models/
+!backend/app/models/
 models.tar.gz
 
 # Datasets / local analysis artifacts

@@ -30,19 +30,20 @@ def auth_login():
 def auth_callback(code: str, db: Session = Depends(get_db)):
     """Exchange auth code for tokens, set up Gmail watch, issue JWT, redirect to the dashboard."""
     try:
-        gmail_client.exchange_code(code)
+        email = gmail_client.exchange_code(code)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"OAuth exchange failed: {e}")
 
-    try:
-        email = gmail_client.get_authenticated_email()
-    except Exception as e:
-        logger.warning("Failed to get authenticated email: %s", e)
-        email = settings.GMAIL_ACCOUNT or "unknown@gmail.com"
+    if not email:
+        try:
+            email = gmail_client.get_authenticated_email()
+        except Exception as e:
+            logger.warning("Failed to get authenticated email: %s", e)
+            email = settings.GMAIL_ACCOUNT or "unknown@gmail.com"
 
     watch_param = "active"
     try:
-        watch_resp = gmail_client.setup_watch()
+        watch_resp = gmail_client.setup_watch(email=email)
         _persist_watch(watch_resp, db, email=email)
     except Exception as e:
         logger.warning("Watch setup failed after OAuth: %s", e)
@@ -91,10 +92,11 @@ def verify_token(authorization: str = Header(default="")):
 @router.post("/api/admin/watch/setup")
 def setup_watch(db: Session = Depends(get_db)):
     try:
-        resp = gmail_client.setup_watch()
+        email = gmail_client.get_authenticated_email()
+        resp = gmail_client.setup_watch(email=email)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    _persist_watch(resp, db)
+    _persist_watch(resp, db, email=email)
     return resp
 
 
@@ -102,14 +104,18 @@ def setup_watch(db: Session = Depends(get_db)):
 def renew_watch(db: Session = Depends(get_db)):
     """Renew Gmail watch (must be called before 7-day expiry)."""
     try:
-        gmail_client.stop_watch()
+        email = gmail_client.get_authenticated_email()
     except Exception:
-        pass  # Ignore if already expired
+        email = ""
     try:
-        resp = gmail_client.setup_watch()
+        gmail_client.stop_watch(email=email)
+    except Exception:
+        pass
+    try:
+        resp = gmail_client.setup_watch(email=email)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    _persist_watch(resp, db)
+    _persist_watch(resp, db, email=email)
     return {"status": "renewed", **resp}
 
 
@@ -129,7 +135,10 @@ def watch_status(db: Session = Depends(get_db)):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _persist_watch(resp: dict, db: Session, email: str = "") -> None:
-    watch = db.query(orm.WatchStatus).first()
+    if email:
+        watch = db.query(orm.WatchStatus).filter_by(email_address=email).first()
+    else:
+        watch = db.query(orm.WatchStatus).first()
     if watch:
         watch.expiration_ms = int(resp.get("expiration", 0))
         watch.history_id = str(resp.get("historyId", watch.history_id or ""))

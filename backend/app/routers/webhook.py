@@ -3,7 +3,7 @@
 POST /webhook/gmail
   - Verifies the push token in the query parameter.
   - Decodes the base64 Pub/Sub message envelope.
-  - Looks up new messages via Gmail history API.
+  - Looks up new messages via Gmail history API using per-account credentials.
   - Runs the full analysis pipeline on each new message.
   - Persists results to the database.
 """
@@ -37,7 +37,9 @@ def _mark_processed(db: Session, message_id: str) -> None:
     db.commit()
 
 
-async def _process_message(message_id: str, history_id: str, db: Session) -> None:
+async def _process_message(
+    message_id: str, history_id: str, email_address: str, db: Session
+) -> None:
     if _is_duplicate(db, message_id):
         logger.debug("Skipping duplicate message %s", message_id)
         return
@@ -45,7 +47,7 @@ async def _process_message(message_id: str, history_id: str, db: Session) -> Non
     start_ms = int(time.time() * 1000)
 
     try:
-        raw = gmail_client.get_message(message_id)
+        raw = gmail_client.get_message(message_id, email=email_address)
     except Exception as e:
         logger.error("Failed to fetch Gmail message %s: %s", message_id, e)
         return
@@ -91,8 +93,8 @@ async def _process_message(message_id: str, history_id: str, db: Session) -> Non
     db.commit()
 
     logger.info(
-        "Processed message %s | risk=%s | score=%.3f | action=%s | %dms",
-        message_id, result.risk_level, result.final_score, action, end_ms - start_ms,
+        "Processed message %s | owner=%s | risk=%s | score=%.3f | action=%s | %dms",
+        message_id, email_address, result.risk_level, result.final_score, action, end_ms - start_ms,
     )
 
 
@@ -107,12 +109,10 @@ async def gmail_webhook(
 
     body = await request.json()
 
-    # Pub/Sub message envelope: {"message": {"data": "<base64>", "messageId": ...}, "subscription": ...}
     message = body.get("message", {})
     data_b64 = message.get("data", "")
 
     if not data_b64:
-        # Pub/Sub keepalive with no data — acknowledge it
         return {"status": "ok"}
 
     try:
@@ -127,27 +127,40 @@ async def gmail_webhook(
     if not history_id:
         return {"status": "ok", "reason": "no historyId"}
 
-    # Load last processed historyId from DB
-    watch = db.query(orm.WatchStatus).first()
+    # Look up per-account WatchStatus; fall back to any record if no match
+    watch = None
+    if email_address:
+        watch = db.query(orm.WatchStatus).filter_by(email_address=email_address).first()
+    if watch is None:
+        watch = db.query(orm.WatchStatus).first()
+
     start_history_id = watch.history_id if watch else history_id
 
     try:
-        new_messages = gmail_client.list_history(start_history_id)
+        new_messages = gmail_client.list_history(start_history_id, email=email_address)
     except Exception as e:
-        logger.error("history.list failed: %s", e)
+        logger.error("history.list failed for %s: %s", email_address, e)
         new_messages = []
 
     for msg in new_messages:
         try:
-            await _process_message(msg["id"], history_id, db)
+            await _process_message(msg["id"], history_id, email_address, db)
         except Exception as e:
             logger.error("Pipeline error for message %s: %s", msg.get("id"), e)
 
-    # Persist latest historyId
-    if watch:
+    # Persist latest historyId for this specific account
+    if watch and watch.email_address == email_address:
         watch.history_id = history_id
-    else:
-        db.add(orm.WatchStatus(email_address=email_address, history_id=history_id))
-    db.commit()
+        db.commit()
+    elif email_address:
+        account_watch = db.query(orm.WatchStatus).filter_by(email_address=email_address).first()
+        if account_watch:
+            account_watch.history_id = history_id
+        else:
+            db.add(orm.WatchStatus(email_address=email_address, history_id=history_id))
+        db.commit()
+    elif watch:
+        watch.history_id = history_id
+        db.commit()
 
     return {"status": "ok", "processed": len(new_messages)}
