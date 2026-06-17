@@ -91,6 +91,10 @@ JWT_SECRET_KEY=your-jwt-secret-key-at-least-32-chars
 
 # 대시보드 URL
 FRONTEND_URL=http://localhost:5173
+
+# AI 모델 경로 (BERT 모델 디렉터리 사용 시)
+NLP_MODEL_PATH=../models/bert
+URL_MODEL_PATH=../models/url_model.pkl
 ```
 
 > Google OAuth credentials는 Google Cloud Console → API 및 서비스 → 사용자 인증 정보에서 발급.  
@@ -146,7 +150,7 @@ npm run dev
 ### 2. Gmail Watch 등록
 
 ```bash
-curl -X POST http://localhost:8000/api/admin/setup-watch \
+curl -X POST http://localhost:8000/api/admin/watch/setup \
   -H "Authorization: Bearer <JWT_TOKEN>"
 ```
 
@@ -177,51 +181,12 @@ curl http://localhost:8000/api/dashboard/system-health
 curl http://localhost:8000/health
 ```
 
-### 이메일 직접 분석 (수동 테스트)
+### 대시보드 최근 이메일 조회
 
 ```bash
-curl -X POST http://localhost:8000/api/analyze \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <JWT_TOKEN>" \
-  -d '{
-    "subject": "계정 보안 알림",
-    "body": "지금 바로 클릭하세요: http://paypal.com.verify-login.net/account",
-    "sender": "security@paypa1-verify.com",
-    "urls": ["http://paypal.com.verify-login.net/account"]
-  }'
-```
-
-### URL 단독 스코어 확인
-
-```bash
-curl -X POST http://localhost:8000/api/analyze/url \
-  -H "Content-Type: application/json" \
-  -d '{"urls": ["https://www.anthropic.com/", "http://paypal.com.verify.net/login"]}'
-```
-
-### 대시보드 최근 이벤트 조회
-
-```bash
-curl http://localhost:8000/api/dashboard/recent-events \
+curl http://localhost:8000/api/dashboard/emails/recent \
   -H "Authorization: Bearer <JWT_TOKEN>"
 ```
-
-### 분석 결과 해석
-
-```json
-{
-  "final_score": 0.85,
-  "verdict": "dangerous",
-  "nlp_score": 0.72,
-  "url_analysis": {
-    "max_score": 0.99,
-    "avg_score": 0.95,
-    "per_url": [
-      { "url": "http://paypal.com.verify.net/login", "score": 0.99 }
-    ]
-  },
-  "rule_score": 0.20
-}
 ```
 
 ---
@@ -298,7 +263,7 @@ curl http://localhost:8000/health
 Gmail Watch는 최대 7일 유효. 서버는 23시간마다 자동 갱신하지만 수동으로도 가능:
 
 ```bash
-curl -X POST http://localhost:8000/api/admin/setup-watch \
+curl -X POST http://localhost:8000/api/admin/watch/setup \
   -H "Authorization: Bearer <JWT_TOKEN>"
 ```
 

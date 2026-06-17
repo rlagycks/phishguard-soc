@@ -27,10 +27,10 @@ def auth_login():
 
 
 @router.get("/auth/callback")
-def auth_callback(code: str, db: Session = Depends(get_db)):
+def auth_callback(code: str, state: str = "", db: Session = Depends(get_db)):
     """Exchange auth code for tokens, set up Gmail watch, issue JWT, redirect to the dashboard."""
     try:
-        email = gmail_client.exchange_code(code)
+        email = gmail_client.exchange_code(code, state)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"OAuth exchange failed: {e}")
 

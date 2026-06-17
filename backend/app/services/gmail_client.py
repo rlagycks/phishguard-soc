@@ -2,15 +2,21 @@
 
 OAuth flow:
   1. Call `get_auth_url()` → redirect user to Google consent screen.
-  2. Google redirects to GOOGLE_REDIRECT_URI with `?code=...`.
-  3. Call `exchange_code(code)` → saves token to credentials/token_{email}.json.
+  2. Google redirects to GOOGLE_REDIRECT_URI with `?code=...&state=...`.
+  3. Call `exchange_code(code, state)` → saves token to credentials/token_{email}.json.
   4. All subsequent calls use `_get_service(email)` which auto-refreshes the token.
 
 Multi-account: each account's token is stored as token_{sanitized_email}.json.
 Legacy token.json is kept for backward compatibility.
+
+PKCE: code_verifier is generated per-login and stored in _pending_verifiers keyed by
+OAuth state. The state is echoed back by Google in the callback, so exchange_code can
+retrieve the verifier without any session cookie.
 """
 
 import base64
+import hashlib
+import secrets
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -22,6 +28,9 @@ from googleapiclient.discovery import build
 from app.config import get_settings
 
 settings = get_settings()
+
+# Maps OAuth state → PKCE code_verifier. Populated in get_auth_url(), consumed in exchange_code().
+_pending_verifiers: Dict[str, str] = {}
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -56,22 +65,36 @@ def get_token_path(email: str) -> Path:
     return CREDENTIALS_DIR / "token_{}.json".format(_sanitize_email(email))
 
 
+def _make_code_verifier() -> str:
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+
+
+def _make_code_challenge(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode()).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
 def get_auth_url() -> str:
     flow = Flow.from_client_config(_client_config(), scopes=SCOPES)
     flow.redirect_uri = settings.GOOGLE_REDIRECT_URI
-    auth_url, _ = flow.authorization_url(
+    code_verifier = _make_code_verifier()
+    auth_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
+        code_challenge=_make_code_challenge(code_verifier),
+        code_challenge_method="S256",
     )
+    _pending_verifiers[state] = code_verifier
     return auth_url
 
 
-def exchange_code(code: str) -> str:
+def exchange_code(code: str, state: str = "") -> str:
     """Exchange auth code for tokens. Saves per-account token; returns authenticated email."""
+    code_verifier = _pending_verifiers.pop(state, None)
     flow = Flow.from_client_config(_client_config(), scopes=SCOPES)
     flow.redirect_uri = settings.GOOGLE_REDIRECT_URI
-    flow.fetch_token(code=code)
+    flow.fetch_token(code=code, code_verifier=code_verifier)
     creds = flow.credentials
     CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
     # Save to legacy path first so _get_service() can work before we know the email
