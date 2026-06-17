@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 _SUSPICIOUS_TLDS = {
     ".xyz", ".top", ".club", ".site", ".online", ".info", ".biz",
     ".tk", ".ml", ".ga", ".cf", ".gq",
+    ".icu", ".cyou", ".monster", ".buzz", ".rest", ".sbs",
+    ".wang", ".vip", ".win", ".loan", ".click", ".link",
 }
 
 _PHISHING_KEYWORDS = {
@@ -42,6 +44,9 @@ class URLFeatures:
     has_port: bool
 
     def to_list(self) -> list[float]:
+        # is_https intentionally excluded: 70% of legitimate training URLs are scheme-less
+        # and get normalized to http://, making is_https=True appear to correlate with
+        # phishing rather than legitimacy. Removing it prevents this training bias.
         return [
             self.url_length,
             self.domain_length,
@@ -53,7 +58,6 @@ class URLFeatures:
             int(self.prefix_suffix_dash),
             self.subdomain_count,
             int(self.is_ip_address),
-            int(self.is_https),
             int(self.suspicious_tld),
             int(self.shortener),
             self.phishing_keyword_count,
@@ -97,9 +101,15 @@ def extract_features(url: str) -> URLFeatures:
     tld = "." + subdomain_parts[-1] if subdomain_parts else ""
     kw_count = sum(1 for kw in _PHISHING_KEYWORDS if kw in normalized.lower())
 
+    # url_length excludes the scheme (http:// or https://) so that scheme-less
+    # training URLs (normalized to http://) and explicit-scheme inference URLs
+    # (http:// or https://) produce the same length for identical content.
+    scheme_prefix = f"{parsed.scheme}://"
+    url_length = len(normalized) - len(scheme_prefix)
+
     return URLFeatures(
         url=url,
-        url_length=len(normalized),
+        url_length=url_length,
         domain_length=len(hostname),
         path_length=len(path),
         num_digits=sum(c.isdigit() for c in normalized),

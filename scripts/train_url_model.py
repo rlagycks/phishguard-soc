@@ -45,7 +45,7 @@ FEATURE_NAMES = [
     "url_length", "domain_length", "path_length",
     "num_digits", "num_special_chars",
     "at_symbol", "double_slash", "prefix_suffix_dash",
-    "subdomain_count", "is_ip_address", "is_https",
+    "subdomain_count", "is_ip_address",
     "suspicious_tld", "shortener", "phishing_keyword_count",
     "query_param_count", "has_port",
 ]
@@ -61,7 +61,7 @@ def extract_batch(urls: list[str], chunk_size: int = 10_000) -> np.ndarray:
             try:
                 rows.append(extract_features(str(url)).to_list())
             except Exception:
-                rows.append([0.0] * 16)
+                rows.append([0.0] * 15)
         pct = min(start + chunk_size, total)
         print(f"  feature extraction: {pct}/{total} ({pct/total*100:.1f}%)", end="\r")
     print()

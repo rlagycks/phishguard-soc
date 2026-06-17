@@ -28,6 +28,104 @@ from app.services.url_extractor import URLFeatures, extract_features
 # Known legitimate email service providers (ESPs) — tracking/click URLs from these
 # domains are legitimate by definition and should never score high.
 # Match on the registrable domain (last two labels) to cover all subdomains.
+# Well-known legitimate domains — training data contains no bare-domain (url_len=domain_len,
+# path=0, subdomain=0) legitimate examples, so XGBoost incorrectly scores these as phishing.
+# Checked on the registrable domain (last two labels) so subdomain attacks aren't bypassed.
+_KNOWN_LEGIT_DOMAINS = {
+    # Major tech / search
+    "google.com", "amazon.com", "microsoft.com", "apple.com",
+    "meta.com", "facebook.com", "twitter.com", "x.com",
+    "youtube.com", "netflix.com", "spotify.com", "twitch.tv",
+    "instagram.com", "linkedin.com", "reddit.com", "tiktok.com",
+    "snapchat.com", "pinterest.com", "tumblr.com", "discord.com",
+    "whatsapp.com", "telegram.org", "signal.org", "zoom.us",
+    "bing.com", "yahoo.com", "duckduckgo.com", "baidu.com",
+    "naver.com", "daum.net", "kakao.com",
+    # Dev / cloud / infra
+    "github.com", "gitlab.com", "bitbucket.org", "stackoverflow.com",
+    "npmjs.com", "pypi.org", "crates.io", "rubygems.org",
+    "docker.com", "kubernetes.io", "terraform.io",
+    "cloudflare.com", "fastly.com", "akamai.com",
+    "digitalocean.com", "linode.com", "vultr.com",
+    "heroku.com", "vercel.com", "netlify.com", "railway.app",
+    "replit.com", "codepen.io", "jsfiddle.net",
+    "aws.amazon.com",  # registrable = amazon.com (already covered)
+    # Google properties (registrable = google.com)
+    "mail.google.com", "drive.google.com", "docs.google.com",
+    "cloud.google.com", "console.cloud.google.com",
+    # Microsoft properties (registrable = microsoft.com or live.com)
+    "outlook.com", "live.com", "hotmail.com", "office.com",
+    "azure.com", "onedrive.live.com",
+    # News / media
+    "nytimes.com", "bbc.com", "bbc.co.uk", "cnn.com",
+    "theguardian.com", "washingtonpost.com", "reuters.com",
+    "bloomberg.com", "wsj.com", "forbes.com", "techcrunch.com",
+    "wired.com", "theverge.com", "arstechnica.com", "engadget.com",
+    "medium.com", "substack.com",
+    # Finance / payments
+    "paypal.com", "stripe.com", "squareup.com", "square.com",
+    "chase.com", "bankofamerica.com", "wellsfargo.com", "citibank.com",
+    "citi.com", "americanexpress.com", "amex.com",
+    "visa.com", "mastercard.com", "discover.com",
+    "coinbase.com", "kraken.com", "binance.com",
+    "fidelity.com", "schwab.com", "vanguard.com", "etrade.com",
+    # E-commerce / retail
+    "ebay.com", "etsy.com", "shopify.com", "shopify.dev",
+    "walmart.com", "target.com", "bestbuy.com", "costco.com",
+    "ikea.com", "aliexpress.com", "alibaba.com",
+    # Productivity / SaaS
+    "notion.so", "trello.com", "asana.com", "jira.atlassian.com",
+    "atlassian.com", "confluence.atlassian.com", "slack.com",
+    "figma.com", "canva.com", "adobe.com", "dropbox.com",
+    "box.com", "salesforce.com", "hubspot.com", "zendesk.com",
+    # Education / reference
+    "wikipedia.org", "wikimedia.org",
+    "coursera.org", "udemy.com", "edx.org", "khanacademy.org",
+    "mit.edu", "stanford.edu", "harvard.edu",
+    # Hosting / domain registrars
+    "godaddy.com", "namecheap.com", "cloudflare.com",
+    "wordpress.com", "wordpress.org", "wix.com", "squarespace.com",
+    # Security / antivirus
+    "virustotal.com", "shodan.io", "haveibeenpwned.com",
+    # Korean major services
+    "naver.com", "kakao.com", "daum.net", "tistory.com",
+    "coupang.com", "11st.co.kr", "gmarket.co.kr", "auction.co.kr",
+    "samsung.com", "lg.com", "sk.com", "kt.com",
+    # Other well-known
+    "twilio.com", "sendgrid.com", "mailgun.com",
+    "openai.com", "anthropic.com", "huggingface.co",
+    "yelp.com", "tripadvisor.com", "booking.com", "airbnb.com",
+    "uber.com", "lyft.com", "doordash.com", "grubhub.com",
+    "weather.com", "accuweather.com",
+    "imdb.com", "rottentomatoes.com",
+    "espn.com", "nba.com", "nfl.com", "mlb.com",
+}
+
+
+def _is_known_legit(url: str) -> bool:
+    """Return True if the URL belongs to a well-known legitimate domain.
+
+    Checks the registrable domain (last two labels of hostname) so that
+    mail.google.com matches google.com, but secure.paypal.com-verify.tk does not.
+    """
+    try:
+        from urllib.parse import urlparse as _parse
+        raw = url if "://" in url else "http://" + url
+        hostname = _parse(raw).hostname or ""
+        parts = hostname.lower().split(".")
+        if len(parts) >= 2:
+            registrable = ".".join(parts[-2:])
+            # Direct match on registrable domain
+            if registrable in _KNOWN_LEGIT_DOMAINS:
+                return True
+            # Also allow fqdn match (e.g. "mail.google.com" stored as-is)
+            if hostname in _KNOWN_LEGIT_DOMAINS:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 _KNOWN_ESP_DOMAINS = {
     # Newsletter / transactional senders
     "stackoverflow.email",
@@ -156,6 +254,16 @@ class URLClassifier:
                 "phishing_keywords": 0,
             }
 
+        if _is_known_legit(url):
+            return {
+                "url": url,
+                "score": 0.10,
+                "is_https": "https://" in url or "://" not in url,
+                "is_ip": False,
+                "suspicious_tld": False,
+                "phishing_keywords": 0,
+            }
+
         features = extract_features(url)
         if self._model is not None:
             try:
@@ -166,6 +274,13 @@ class URLClassifier:
                 score = _heuristic_score(features)
         else:
             score = _heuristic_score(features)
+
+        # Guard against false negatives: when the URL has hard phishing indicators
+        # (suspicious TLD + multiple keywords, IP address, or URL shortener) but the
+        # ML model gives an unexpectedly low score due to training-data artifacts,
+        # use the higher of the ML score and the heuristic floor.
+        if _has_hard_phishing_indicators(features):
+            score = max(score, _heuristic_score(features))
 
         return {
             "url": url,
@@ -195,6 +310,28 @@ def _heuristic_score(f: URLFeatures) -> float:
     if f.url_length > 75:
         score += 0.10
     return min(1.0, score)
+
+
+def _has_hard_phishing_indicators(f: URLFeatures) -> bool:
+    """Return True when the URL has unambiguous phishing signals.
+
+    XGBoost can underweight hard indicators when specific length/query-param
+    combinations dominate certain tree splits (training-data artifact). When
+    these hard indicators are present the heuristic score is used as a floor
+    so the ML output cannot produce a false negative.
+
+    Conditions (any one is sufficient):
+    - IP-literal host  (classic phishing)
+    - URL shortener    (hiding destination)
+    - suspicious TLD + phishing keywords >= 2  (e.g. verify-paypal.xyz/login)
+    """
+    if f.is_ip_address:
+        return True
+    if f.shortener:
+        return True
+    if f.suspicious_tld and f.phishing_keyword_count >= 2:
+        return True
+    return False
 
 
 # ── Module-level singleton + convenience function ────────────────────────────
