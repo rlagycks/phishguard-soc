@@ -18,11 +18,63 @@ import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 import numpy as np
 
 from app.config import get_settings
 from app.services.url_extractor import URLFeatures, extract_features
+
+# Known legitimate email service providers (ESPs) — tracking/click URLs from these
+# domains are legitimate by definition and should never score high.
+# Match on the registrable domain (last two labels) to cover all subdomains.
+_KNOWN_ESP_DOMAINS = {
+    # Newsletter / transactional senders
+    "stackoverflow.email",
+    "sendgrid.net",
+    "mailchimp.com",
+    "list-manage.com",       # Mailchimp click-tracking
+    "hubspot.com",
+    "hubspotlinks.com",
+    "hs-email.net",
+    "constantcontact.com",
+    "mandrillapp.com",
+    "postmarkapp.com",
+    "mailgun.org",
+    "amazonses.com",
+    "sailthru.com",
+    "klaviyo.com",
+    "marketo.com",
+    "eloqua.com",
+    "pardot.com",
+    "createsend.com",
+    "cmail19.com",           # Campaign Monitor
+    "cmail20.com",
+    "exacttarget.com",       # Salesforce Marketing Cloud
+    "salesforceiq.com",
+    "intercom-mail.com",
+    "customer.io",
+    "drip.com",
+    "activecampaign.com",
+    # Major transactional
+    "mailjet.com",
+    "sendinblue.com",
+    "brevo.com",
+    "sparkpost.com",
+}
+
+
+def _is_known_esp(url: str) -> bool:
+    """Return True if the URL belongs to a known legitimate ESP/mailing domain."""
+    try:
+        hostname = urlparse(url).hostname or ""
+        parts = hostname.lower().split(".")
+        if len(parts) >= 2:
+            registrable = ".".join(parts[-2:])
+            return registrable in _KNOWN_ESP_DOMAINS
+    except Exception:
+        pass
+    return False
 
 settings = get_settings()
 
@@ -94,6 +146,16 @@ class URLClassifier:
     # ── Internals ───────────────────────────────────────────────────────────────
 
     def _score_one(self, url: str) -> dict:
+        if _is_known_esp(url):
+            return {
+                "url": url,
+                "score": 0.05,
+                "is_https": True,
+                "is_ip": False,
+                "suspicious_tld": False,
+                "phishing_keywords": 0,
+            }
+
         features = extract_features(url)
         if self._model is not None:
             try:

@@ -65,8 +65,21 @@ class URLFeatures:
 _IP_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 
 
+def _normalize_url(url: str) -> str:
+    """Prepend http:// when no scheme is present so urlparse extracts netloc correctly.
+
+    Without this, urlparse('facebook.com/path') returns netloc='', path='facebook.com/path',
+    producing domain_length=0 and path_length=full_url_length — matching the biased
+    distribution the model was trained on for 70% of legitimate training URLs.
+    """
+    if "://" not in url:
+        return "http://" + url
+    return url
+
+
 def extract_features(url: str) -> URLFeatures:
-    parsed = urlparse(url)
+    normalized = _normalize_url(url)
+    parsed = urlparse(normalized)
     domain = parsed.netloc.lower()
     path = parsed.path or ""
     query = parsed.query or ""
@@ -78,21 +91,21 @@ def extract_features(url: str) -> URLFeatures:
     # Example: sub.example.com → 1 subdomain; example.com → 0
     subdomain_count = max(0, len(subdomain_parts) - 2)
 
-    special_chars = sum(url.count(c) for c in "@-_%=?&")
+    special_chars = sum(normalized.count(c) for c in "@-_%=?&")
     query_params = len(query.split("&")) if query else 0
 
     tld = "." + subdomain_parts[-1] if subdomain_parts else ""
-    kw_count = sum(1 for kw in _PHISHING_KEYWORDS if kw in url.lower())
+    kw_count = sum(1 for kw in _PHISHING_KEYWORDS if kw in normalized.lower())
 
     return URLFeatures(
         url=url,
-        url_length=len(url),
+        url_length=len(normalized),
         domain_length=len(hostname),
         path_length=len(path),
-        num_digits=sum(c.isdigit() for c in url),
+        num_digits=sum(c.isdigit() for c in normalized),
         num_special_chars=special_chars,
         at_symbol="@" in parsed.netloc,
-        double_slash=url.count("//") > 1,
+        double_slash=normalized.count("//") > 1,
         prefix_suffix_dash="-" in hostname,
         subdomain_count=subdomain_count,
         is_ip_address=bool(_IP_RE.match(hostname)),
