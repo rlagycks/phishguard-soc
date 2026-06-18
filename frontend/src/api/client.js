@@ -1,15 +1,30 @@
-import { getAccessToken } from "./auth.js";
+import { clearTokens, getAccessToken, refreshAccessToken } from "./auth.js";
 import { adaptEmailDetail, adaptEmailSummary, adaptStats } from "./adapters.js";
+
+// Shared refresh promise so concurrent 401s don't each trigger a separate refresh
+let _refreshPromise = null;
 
 async function request(path, options = {}) {
   const token = getAccessToken();
   const headers = {
     "Content-Type": "application/json",
-    ...(options.headers || {})
+    ...(options.headers || {}),
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(path, { ...options, headers });
+
+  if (res.status === 401 && !options._retried) {
+    if (!_refreshPromise) {
+      _refreshPromise = refreshAccessToken().finally(() => { _refreshPromise = null; });
+    }
+    const ok = await _refreshPromise;
+    if (ok) return request(path, { ...options, _retried: true });
+    clearTokens();
+    window.location.href = "/auth/login";
+    throw new Error("Session expired");
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `Request failed: ${res.status}`);
@@ -39,7 +54,7 @@ export async function updateEmailStatus(id, status) {
   return adaptEmailDetail(
     await request(`/api/dashboard/emails/${id}/status`, {
       method: "PATCH",
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ status }),
     })
   );
 }
